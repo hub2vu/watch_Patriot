@@ -1,0 +1,15 @@
+.venv/
+.venv-build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+release/
+sandbox/
+plan/
+*.sqlite3
+logs/
+config.toml
+*.spec.bak

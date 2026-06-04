@@ -1,0 +1,115 @@
+from io import BytesIO
+
+from PIL import Image, ImageDraw
+
+from dc_watch.config import AppConfig
+from dc_watch.image_scan import compute_phash, compute_sha256, compute_tile_phashes, phash_distance, scan_image, scan_post_images
+from dc_watch.models import BadHash
+
+
+def _png_bytes(color: tuple[int, int, int]) -> bytes:
+    image = Image.new("RGB", (64, 64), color)
+    stream = BytesIO()
+    image.save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def test_compute_sha256_and_phash_are_stable() -> None:
+    data = _png_bytes((12, 34, 56))
+
+    assert compute_sha256(data) == compute_sha256(data)
+    assert len(compute_sha256(data)) == 64
+    assert compute_phash(data) == compute_phash(data)
+    assert len(compute_phash(data)) == 16
+
+
+def test_phash_distance_counts_hamming_distance() -> None:
+    assert phash_distance("0000000000000000", "0000000000000000") == 0
+    assert phash_distance("0000000000000000", "0000000000000001") == 1
+    assert phash_distance("ffffffffffffffff", "0000000000000000") == 64
+
+
+def test_scan_image_marks_bad_sha256_as_high() -> None:
+    data = _png_bytes((200, 20, 20))
+    bad = BadHash(label="known", sha256=compute_sha256(data), phash=None)
+
+    result = scan_image(data, [bad], AppConfig())
+
+    assert result.risk == "high"
+    assert any("SHA-256" in reason for reason in result.reasons)
+
+
+def test_scan_image_marks_similar_phash_as_high() -> None:
+    data = _png_bytes((20, 20, 200))
+    bad = BadHash(label="known", sha256=None, phash=compute_phash(data))
+
+    result = scan_image(data, [bad], AppConfig(phash_threshold=7))
+
+    assert result.risk == "high"
+    assert any("pHash" in reason for reason in result.reasons)
+
+
+def test_scan_post_images_aggregates_image_hashes() -> None:
+    data = _png_bytes((0, 120, 0))
+    result = scan_post_images([data], [], AppConfig())
+
+    assert result.risk == "none"
+    assert result.image_count == 1
+    assert result.image_hashes[0].sha256 == compute_sha256(data)
+
+
+def test_scan_image_only_calls_nudenet_when_enabled(monkeypatch) -> None:
+    data = _png_bytes((12, 120, 90))
+    calls: list[float] = []
+
+    def fake_detect_nudity(_data: bytes, threshold: float) -> list[str]:
+        calls.append(threshold)
+        return ["NudeNet exposed label: EXPOSED_TEST score=0.99"]
+
+    monkeypatch.setattr("dc_watch.image_scan.detect_nudity", fake_detect_nudity)
+
+    disabled = scan_image(data, [], AppConfig(enable_nudenet=False, nude_score_threshold=0.66))
+    enabled = scan_image(data, [], AppConfig(enable_nudenet=True, nude_score_threshold=0.66))
+
+    assert disabled.risk == "none"
+    assert enabled.risk == "high"
+    assert calls == [0.66]
+
+
+def test_tile_phash_matches_cropped_reupload() -> None:
+    original = _pattern_grid_png_bytes()
+    crop = _crop_png_bytes(original, box=(32, 32, 64, 64))
+    bad = BadHash(label="known_crop_source", sha256=None, phash=None, tile_phashes=tuple(compute_tile_phashes(original, grid_size=3)))
+
+    result = scan_image(
+        crop,
+        [bad],
+        AppConfig(enable_tile_phash=True, tile_phash_grid_size=3, tile_phash_threshold=0, tile_phash_min_matches=1),
+    )
+
+    assert result.risk == "high"
+    assert any("tile pHash" in reason for reason in result.reasons)
+
+
+def _pattern_grid_png_bytes() -> bytes:
+    image = Image.new("RGB", (96, 96), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    for row in range(3):
+        for col in range(3):
+            left = col * 32
+            top = row * 32
+            base = ((row * 73 + col * 41) % 255, (row * 31 + col * 89) % 255, (row * 109 + col * 23) % 255)
+            draw.rectangle((left, top, left + 31, top + 31), fill=base)
+            draw.line((left, top, left + 31, top + 31), fill=(255 - base[0], 255 - base[1], 255 - base[2]), width=3)
+            draw.ellipse((left + 8, top + 5, left + 24, top + 23), outline=(base[2], base[0], base[1]), width=2)
+    stream = BytesIO()
+    image.save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def _crop_png_bytes(data: bytes, box: tuple[int, int, int, int]) -> bytes:
+    with Image.open(BytesIO(data)) as image:
+        crop = image.crop(box)
+        stream = BytesIO()
+        crop.save(stream, format="PNG")
+        return stream.getvalue()

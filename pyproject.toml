@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dc-watch"
+version = "0.1.0"
+description = "Local topmost popup watcher for risky image posts on DCInside galleries"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "DCWatch contributors" }]
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "imagehash>=4.3",
+  "Pillow>=10.0",
+  "requests>=2.31",
+  "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+nude = ["nudenet>=3.4"]
+tray = ["pystray>=0.19"]
+build = ["pyinstaller>=6.0"]
+dev = ["pytest>=8.0", "pyinstaller>=6.0"]
+all = ["nudenet>=3.4", "pystray>=0.19", "pytest>=8.0", "pyinstaller>=6.0"]
+
+[project.scripts]
+dc-watch = "dc_watch.cli:main"
+DCWatch = "dc_watch.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dc_watch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
