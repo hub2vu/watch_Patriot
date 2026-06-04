@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dc_watch.local_popup import build_popup_message, show_topmost_popup
+from dc_watch.local_popup import build_popup_message, enqueue_parented_popup, show_topmost_popup
 from dc_watch.models import Alert
 
 
@@ -46,6 +46,27 @@ def test_high_alert_invokes_topmost_renderer(monkeypatch) -> None:
     show_topmost_popup(_alert())
 
     assert calls == [(_alert(), True)]
+
+
+def test_gui_parented_popup_uses_parent_renderer_without_new_tk_mainloop(monkeypatch) -> None:
+    calls: list[tuple[object, Alert, bool]] = []
+
+    class FakeParent:
+        def after(self, _delay: int, callback) -> None:
+            callback()
+
+    parent = FakeParent()
+
+    def fake_render(parent_arg, alert: Alert, topmost: bool, on_open_post=None, on_remember_bad_hash=None, on_closed=None) -> None:
+        calls.append((parent_arg, alert, topmost))
+        if on_closed:
+            on_closed()
+
+    monkeypatch.setattr("dc_watch.local_popup._render_parented_popup_window", fake_render)
+
+    enqueue_parented_popup(parent, _alert(), topmost=True)
+
+    assert calls == [(parent, _alert(), True)]
 
 
 def test_package_contains_no_forbidden_notification_or_sound_code() -> None:

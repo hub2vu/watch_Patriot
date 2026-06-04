@@ -6,7 +6,7 @@ import webbrowser
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock
-from typing import Callable
+from typing import Any, Callable
 
 from .models import Alert
 
@@ -19,10 +19,21 @@ _URL_RE = re.compile(r"https?://[^\s)>\"]+")
 _POPUP_LOCK = Lock()
 _POPUP_QUEUE: deque["_QueuedPopup"] = deque()
 _SHOWING = False
+_PARENT_POPUP_QUEUE: deque["_ParentedQueuedPopup"] = deque()
+_PARENT_SHOWING = False
 
 
 @dataclass(frozen=True)
 class _QueuedPopup:
+    alert: Alert
+    topmost: bool
+    on_open_post: OpenCallback | None
+    on_remember_bad_hash: RememberCallback | None
+
+
+@dataclass(frozen=True)
+class _ParentedQueuedPopup:
+    parent: Any
     alert: Alert
     topmost: bool
     on_open_post: OpenCallback | None
@@ -103,6 +114,18 @@ def enqueue_popup(
     _drain_queue()
 
 
+def enqueue_parented_popup(
+    parent: Any,
+    alert: Alert,
+    topmost: bool = True,
+    on_open_post: OpenCallback | None = None,
+    on_remember_bad_hash: RememberCallback | None = None,
+) -> None:
+    with _POPUP_LOCK:
+        _PARENT_POPUP_QUEUE.append(_ParentedQueuedPopup(parent, alert, topmost, on_open_post, on_remember_bad_hash))
+    parent.after(0, lambda: _drain_parented_queue(parent))
+
+
 def _drain_queue() -> None:
     global _SHOWING
     with _POPUP_LOCK:
@@ -122,6 +145,36 @@ def _drain_queue() -> None:
             _SHOWING = False
         if _POPUP_QUEUE:
             _drain_queue()
+
+
+def _drain_parented_queue(parent: Any) -> None:
+    global _PARENT_SHOWING
+    with _POPUP_LOCK:
+        if _PARENT_SHOWING or not _PARENT_POPUP_QUEUE:
+            return
+        _PARENT_SHOWING = True
+        queued = _PARENT_POPUP_QUEUE.popleft()
+
+    def on_closed() -> None:
+        global _PARENT_SHOWING
+        with _POPUP_LOCK:
+            _PARENT_SHOWING = False
+            has_more = bool(_PARENT_POPUP_QUEUE)
+        if has_more:
+            parent.after(0, lambda: _drain_parented_queue(parent))
+
+    try:
+        _render_parented_popup_window(
+            queued.parent,
+            queued.alert,
+            topmost=queued.topmost,
+            on_open_post=queued.on_open_post,
+            on_remember_bad_hash=queued.on_remember_bad_hash,
+            on_closed=on_closed,
+        )
+    except Exception:
+        log.exception("Failed to render parented popup for post %s", queued.alert.post_no)
+        on_closed()
 
 
 def _render_popup_window(
@@ -172,6 +225,73 @@ def _render_popup_window(
     tk.Button(buttons, text="닫기", command=root.destroy).pack(side="right")
     tk.Button(buttons, text="이 글을 확정 테러 해시 DB에 등록", command=remember).pack(side="right", padx=(0, 8))
     root.mainloop()
+
+
+def _render_parented_popup_window(
+    parent: Any,
+    alert: Alert,
+    topmost: bool,
+    on_open_post: OpenCallback | None = None,
+    on_remember_bad_hash: RememberCallback | None = None,
+    on_closed: Callable[[], None] | None = None,
+) -> None:
+    import tkinter as tk
+    from tkinter import messagebox
+
+    window = tk.Toplevel(parent)
+    window.title("[?밴갇 ?대?吏 ?뚮윭 ?섏떖]")
+    window.geometry("620x430")
+    window.resizable(True, True)
+    if topmost:
+        window.attributes("-topmost", True)
+    window.lift()
+    try:
+        window.focus_force()
+    except tk.TclError:
+        pass
+
+    text = tk.Text(window, wrap="word", height=18, width=76)
+    text.insert("1.0", build_popup_message(alert))
+    text.configure(state="disabled")
+    text.pack(fill="both", expand=True, padx=12, pady=(12, 8))
+
+    buttons = tk.Frame(window)
+    buttons.pack(fill="x", padx=12, pady=(0, 12))
+    closed = False
+
+    def close_popup() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        try:
+            window.destroy()
+        finally:
+            if on_closed:
+                on_closed()
+
+    def open_post() -> None:
+        if on_open_post:
+            on_open_post(alert)
+        else:
+            webbrowser.open(alert.url)
+
+    def remember() -> None:
+        ok = messagebox.askyesno(
+            "?뺤젙 ?뚮윭 ?댁떆 DB ?깅줉",
+            "?ъ슜?먭? 吏곸젒 ?뺤씤??湲????λ맂 ?대?吏 ?댁떆瑜??뺤젙 ?뚮윭 ?댁떆 DB???깅줉?좉퉴??",
+            parent=window,
+        )
+        if ok and on_remember_bad_hash:
+            on_remember_bad_hash(alert)
+
+    tk.Button(buttons, text="寃뚯떆湲 ?닿린", command=open_post).pack(side="left")
+    tk.Button(buttons, text="?リ린", command=close_popup).pack(side="right")
+    tk.Button(buttons, text="??湲???뺤젙 ?뚮윭 ?댁떆 DB???깅줉", command=remember).pack(side="right", padx=(0, 8))
+    try:
+        window.protocol("WM_DELETE_WINDOW", close_popup)
+    except tk.TclError:
+        pass
 
 
 def _strip_unapproved_urls(text: str, allowed_url: str) -> str:

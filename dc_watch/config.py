@@ -31,7 +31,7 @@ class AppConfig:
     enable_orb_matching: bool = True
     orb_max_features: int = 500
     orb_distance_threshold: int = 64
-    orb_min_matches: int = 12
+    orb_min_matches: int = 60
     enable_nudenet: bool = False
     nude_score_threshold: float = 0.45
     alert_on_analysis_failure: bool = False

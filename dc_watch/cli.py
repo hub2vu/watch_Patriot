@@ -315,6 +315,7 @@ def remember_post(db: Database, post_no: str, label: str, config: AppConfig | No
 
 
 def _show_alert(config: AppConfig, db: Database, alert: Alert, popup_handler: PopupHandler | None) -> None:
+    log.info("local popup requested for post %s risk=%s", alert.post_no, alert.risk)
     if popup_handler:
         popup_handler(alert)
         return

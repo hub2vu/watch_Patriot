@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import threading
 import time
 import webbrowser
@@ -11,10 +12,12 @@ from .cli import remember_file, remember_post, run_watch
 from .config import AppConfig, ensure_user_files, load_config, save_config
 from .db import Database
 from .image_scan import reset_nudenet_detector
-from .local_popup import enqueue_popup, show_test_popup
+from .local_popup import enqueue_parented_popup, show_test_popup
 from .logging_setup import setup_logging
 from .models import Alert
 from .optional_deps import OptionalDependencyInstallResult, install_nudenet, is_nudenet_available
+
+log = logging.getLogger(__name__)
 
 
 class DCWatchApp:
@@ -457,7 +460,15 @@ class DCWatchApp:
 
     def _schedule_popup(self, alert: Alert) -> None:
         topmost = self.config.topmost_popup or alert.risk == "high"
-        self.root.after(0, lambda: enqueue_popup(alert, topmost=topmost, on_remember_bad_hash=self._remember_alert_confirmed))
+        self.root.after(0, lambda: self._show_alert_popup(alert, topmost))
+
+    def _show_alert_popup(self, alert: Alert, topmost: bool) -> None:
+        try:
+            enqueue_parented_popup(self.root, alert, topmost=topmost, on_remember_bad_hash=self._remember_alert_confirmed)
+            log.info("scheduled local popup for post %s", alert.post_no)
+        except Exception as exc:
+            log.exception("failed to schedule local popup for post %s", alert.post_no)
+            self.status_var.set(f"popup failed: {exc.__class__.__name__}")
 
     def _confirm_and_remember_alert(self, alert: Alert) -> None:
         from tkinter import messagebox
