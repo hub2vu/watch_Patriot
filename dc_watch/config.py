@@ -26,8 +26,8 @@ class AppConfig:
     tile_phash_threshold: int = 6
     tile_phash_min_matches: int = 1
     enable_crop_resistant_hash: bool = True
-    crop_hash_region_cutoff: int = 1
-    crop_hash_hamming_cutoff: int = 16
+    crop_hash_region_cutoff: int = 2
+    crop_hash_hamming_cutoff: int = 8
     enable_orb_matching: bool = True
     orb_max_features: int = 500
     orb_distance_threshold: int = 64
@@ -82,7 +82,7 @@ def load_config(config_path: str | Path | None = None, appdata_dir: str | Path |
     path = Path(config_path) if config_path is not None else _discover_config_path(appdata_dir)
     data: dict[str, Any] = {}
     if path.exists():
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
 
     allowed = {field.name for field in AppConfig.__dataclass_fields__.values() if not field.name.startswith("_")}
     filtered = {key: value for key, value in data.items() if key in allowed}

@@ -118,7 +118,7 @@ def test_generate_image_variants_includes_rotations_and_flips() -> None:
     assert len(variants) >= 8
 
 
-def test_scan_image_marks_crop_resistant_hash_match_as_high() -> None:
+def test_scan_image_suppresses_standalone_crop_resistant_hash_match() -> None:
     original = _pattern_grid_png_bytes()
     crop = _crop_png_bytes(original, box=(0, 0, 64, 64))
     bad = BadHash(label="known_crop_source", crop_hash=compute_crop_resistant_hash(original))
@@ -126,11 +126,54 @@ def test_scan_image_marks_crop_resistant_hash_match_as_high() -> None:
     result = scan_image(
         crop,
         [bad],
-        AppConfig(enable_crop_resistant_hash=True, crop_hash_hamming_cutoff=16, crop_hash_region_cutoff=1),
+        AppConfig(
+            enable_crop_resistant_hash=True,
+            enable_orb_matching=False,
+            crop_hash_hamming_cutoff=16,
+            crop_hash_region_cutoff=1,
+        ),
+    )
+
+    assert result.risk == "none"
+    assert not any("crop-resistant" in reason for reason in result.reasons)
+
+
+def test_scan_image_suppresses_standalone_orb_feature_match(monkeypatch) -> None:
+    data = _pattern_grid_png_bytes()
+    bad = BadHash(label="known_orb_source", orb_descriptor=b"known")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_orb_descriptor", lambda _data, _max_features=500: b"candidate")
+    monkeypatch.setattr("dc_watch.image_scan.orb_match_count", lambda _candidate, _known, _distance_threshold=64: 99)
+
+    result = scan_image(data, [bad], AppConfig(enable_crop_resistant_hash=False, enable_orb_matching=True, orb_min_matches=65))
+
+    assert result.risk == "none"
+    assert not any("ORB" in reason for reason in result.reasons)
+
+
+def test_scan_image_marks_crop_resistant_and_orb_together_as_high(monkeypatch) -> None:
+    original = _pattern_grid_png_bytes()
+    crop = _crop_png_bytes(original, box=(0, 0, 64, 64))
+    bad = BadHash(label="known_crop_source", crop_hash=compute_crop_resistant_hash(original), orb_descriptor=b"known")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_orb_descriptor", lambda _data, _max_features=500: b"candidate")
+    monkeypatch.setattr("dc_watch.image_scan.orb_match_count", lambda _candidate, _known, _distance_threshold=64: 99)
+
+    result = scan_image(
+        crop,
+        [bad],
+        AppConfig(
+            enable_crop_resistant_hash=True,
+            enable_orb_matching=True,
+            crop_hash_hamming_cutoff=16,
+            crop_hash_region_cutoff=1,
+            orb_min_matches=65,
+        ),
     )
 
     assert result.risk == "high"
     assert any("crop-resistant" in reason for reason in result.reasons)
+    assert any("ORB" in reason for reason in result.reasons)
 
 
 def test_build_bad_hash_records_from_file_stores_variant_crop_and_tile_hashes(tmp_path) -> None:

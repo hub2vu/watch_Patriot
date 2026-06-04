@@ -19,8 +19,8 @@ def test_default_config_uses_requested_safety_defaults(tmp_path: Path) -> None:
     assert config.tile_phash_threshold == 6
     assert config.tile_phash_min_matches == 1
     assert config.enable_crop_resistant_hash is True
-    assert config.crop_hash_region_cutoff == 1
-    assert config.crop_hash_hamming_cutoff == 16
+    assert config.crop_hash_region_cutoff == 2
+    assert config.crop_hash_hamming_cutoff == 8
     assert config.enable_orb_matching is True
     assert config.orb_max_features == 500
     assert config.orb_distance_threshold == 64
@@ -69,6 +69,15 @@ def test_save_and_load_config_round_trip(tmp_path: Path) -> None:
     assert loaded.enable_nudenet is True
     assert loaded.nude_score_threshold == 0.7
     assert loaded.database_file == path.parent / "local.sqlite3"
+
+
+def test_load_config_accepts_utf8_bom(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("\ufeffgallery_id = \"bom-gallery\"\n", encoding="utf-8")
+
+    loaded = load_config(config_path=path, appdata_dir=tmp_path)
+
+    assert loaded.gallery_id == "bom-gallery"
 
 
 def test_default_config_does_not_create_appdata_when_appdata_env_exists(tmp_path: Path, monkeypatch) -> None:

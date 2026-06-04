@@ -153,17 +153,17 @@ def scan_image(data: bytes, bad_hashes: list[BadHash], config: AppConfig) -> Ima
 
     for bad_hash in bad_hashes:
         bad_label = _bad_hash_display_label(bad_hash)
+        strong_reasons: list[str] = []
+        weak_reasons: list[str] = []
         if bad_hash.sha256 and bad_hash.sha256.lower() == sha.lower():
-            risk = "high"
-            reasons.append(f"bad SHA-256 match: {bad_label}")
+            strong_reasons.append(f"bad SHA-256 match: {bad_label}")
         if phash and bad_hash.phash:
             try:
                 distance = phash_distance(phash, bad_hash.phash)
             except ValueError:
-                continue
+                distance = config.phash_threshold + 1
             if distance <= config.phash_threshold:
-                risk = "high"
-                reasons.append(f"bad pHash match: {bad_label} distance={distance}")
+                strong_reasons.append(f"bad pHash match: {bad_label} distance={distance}")
         if config.enable_tile_phash and phash and bad_hash.tile_phashes:
             match_count = _tile_phash_match_count(
                 [phash, *tile_phashes],
@@ -171,20 +171,21 @@ def scan_image(data: bytes, bad_hashes: list[BadHash], config: AppConfig) -> Ima
                 config.tile_phash_threshold,
             )
             if match_count >= max(1, config.tile_phash_min_matches):
-                risk = "high"
-                reasons.append(f"bad tile pHash match: {bad_label} matches={match_count}")
+                strong_reasons.append(f"bad tile pHash match: {bad_label} matches={match_count}")
         if config.enable_crop_resistant_hash and crop_hash and bad_hash.crop_hash:
             try:
                 if crop_hash_matches(crop_hash, bad_hash.crop_hash, config.crop_hash_region_cutoff, config.crop_hash_hamming_cutoff):
-                    risk = "high"
-                    reasons.append(f"bad crop-resistant hash match: {bad_label}")
+                    weak_reasons.append(f"bad crop-resistant hash match: {bad_label}")
             except (ValueError, TypeError):
-                continue
+                pass
         if config.enable_orb_matching and orb_descriptor and bad_hash.orb_descriptor:
             matches = orb_match_count(orb_descriptor, bad_hash.orb_descriptor, config.orb_distance_threshold)
             if matches >= max(1, config.orb_min_matches):
-                risk = "high"
-                reasons.append(f"bad ORB feature match: {bad_label} matches={matches}")
+                weak_reasons.append(f"bad ORB feature match: {bad_label} matches={matches}")
+        if strong_reasons or len(weak_reasons) >= 2:
+            risk = "high"
+            reasons.extend(strong_reasons)
+            reasons.extend(weak_reasons)
 
     if config.enable_nudenet:
         nude_reasons = detect_nudity(data, config.nude_score_threshold)

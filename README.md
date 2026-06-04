@@ -112,8 +112,8 @@ tile_phash_grid_size = 3
 tile_phash_threshold = 6
 tile_phash_min_matches = 1
 enable_crop_resistant_hash = true
-crop_hash_region_cutoff = 1
-crop_hash_hamming_cutoff = 16
+crop_hash_region_cutoff = 2
+crop_hash_hamming_cutoff = 8
 enable_orb_matching = true
 orb_max_features = 500
 orb_distance_threshold = 64
@@ -143,10 +143,12 @@ use_appdata_dir = false
 - `phash_threshold`를 올립니다. 예: `7` → `9`
 - `tile_phash_threshold`를 올립니다. 예: `6` → `8`
 - `tile_phash_min_matches`를 낮춥니다. 기본값은 `1`입니다.
-- `crop_hash_hamming_cutoff`를 올립니다. 기본값은 `16`입니다.
+- `crop_hash_hamming_cutoff`를 올립니다. 기본값은 `8`입니다.
 - `orb_min_matches`를 낮춥니다. 기본값은 `65`입니다.
 
 값을 올릴수록 유사 이미지 탐지는 넓어지지만 오탐 가능성도 커집니다.
+
+`crop-resistant hash`와 `ORB feature matching`은 기본적으로 보조 신호입니다. 둘 중 하나만 단독으로 맞으면 high 경보를 만들지 않고, SHA-256/pHash/tile pHash 같은 다른 신호가 함께 맞거나 crop-resistant hash와 ORB가 같은 bad hash 항목에서 함께 맞을 때만 high 경보를 만듭니다.
 
 ## 확정 테러 이미지 해시 등록
 
