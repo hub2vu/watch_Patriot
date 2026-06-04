@@ -22,6 +22,8 @@ DCWatch는 이미지를 화면에 표시하지 않고 바이트로만 다운로�
 - SHA-256 완전 일치: 확정된 테러 이미지 해시와 같으면 `high`
 - pHash 유사도: 확정된 테러 이미지 pHash와 Hamming distance가 설정값 이하이면 `high`
 - 타일 pHash: 이미지를 3x3 같은 격자로 나눈 뒤 조각별 pHash도 비교합니다. 기존 이미지의 일부만 크롭해 재업로드한 경우를 더 잘 잡기 위한 보조 탐지입니다.
+- crop-resistant hash: imagehash의 segment hash를 저장해 부분 crop 재업로드를 추가로 비교합니다.
+- ORB feature matching: OpenCV가 포함된 빌드에서는 회전/크롭에 강한 특징점 descriptor도 비교합니다. OpenCV가 없으면 이 기능만 자동으로 건너뜁니다.
 - NudeNet: 노출/나체 계열 라벨 점수가 설정값 이상이면 `high`
 - 분석 실패: `alert_on_analysis_failure = true`일 때만 `warning`
 
@@ -109,6 +111,13 @@ enable_tile_phash = true
 tile_phash_grid_size = 3
 tile_phash_threshold = 6
 tile_phash_min_matches = 1
+enable_crop_resistant_hash = true
+crop_hash_region_cutoff = 1
+crop_hash_hamming_cutoff = 16
+enable_orb_matching = true
+orb_max_features = 500
+orb_distance_threshold = 64
+orb_min_matches = 12
 enable_nudenet = false
 nude_score_threshold = 0.45
 alert_on_analysis_failure = false
@@ -134,6 +143,8 @@ use_appdata_dir = false
 - `phash_threshold`를 올립니다. 예: `7` → `9`
 - `tile_phash_threshold`를 올립니다. 예: `6` → `8`
 - `tile_phash_min_matches`를 낮춥니다. 기본값은 `1`입니다.
+- `crop_hash_hamming_cutoff`를 올립니다. 기본값은 `16`입니다.
+- `orb_min_matches`를 낮춥니다. 기본값은 `12`입니다.
 
 값을 올릴수록 유사 이미지 탐지는 넓어지지만 오탐 가능성도 커집니다.
 
@@ -152,6 +163,8 @@ python -m dc_watch remember-post 1234567 known_attack_001
 ```powershell
 python -m dc_watch remember-file .\bad.jpg known_attack_002
 ```
+
+`remember-file`은 원본뿐 아니라 좌우반전, 회전, 회전+반전 변형의 SHA-256/pHash/tile pHash/crop-resistant hash/ORB descriptor를 등록합니다. 원본 이미지 파일이나 변형 이미지는 DB에 저장하지 않습니다.
 
 GUI에서는 최근 경보 목록 또는 팝업의 `이 글을 확정 테러 해시 DB에 등록` 버튼을 사용할 수 있습니다. 로컬 파일을 직접 등록하려면 메인 창의 `로컬 이미지 해시 DB 등록` 버튼을 누른 뒤 파일과 라벨을 선택합니다.
 

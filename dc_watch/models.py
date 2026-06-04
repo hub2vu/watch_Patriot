@@ -21,6 +21,9 @@ class BadHash:
     label: str
     sha256: str | None = None
     phash: str | None = None
+    crop_hash: str | None = None
+    orb_descriptor: bytes | None = None
+    variant: str = "original"
     source_post_no: str | None = None
     source_file: str | None = None
     added_at: int = 0
@@ -32,6 +35,8 @@ class BadHash:
 class ImageHashRecord:
     sha256: str
     phash: str | None
+    crop_hash: str | None = None
+    orb_descriptor: bytes | None = None
     tile_phashes: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -41,6 +46,8 @@ class ImageScanResult:
     phash: str | None
     risk: Risk
     reasons: list[str] = field(default_factory=list)
+    crop_hash: str | None = None
+    orb_descriptor: bytes | None = None
     tile_phashes: tuple[str, ...] = field(default_factory=tuple)
 
 

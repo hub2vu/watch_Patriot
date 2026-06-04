@@ -73,3 +73,28 @@ def test_delete_bad_hash_removes_tiles_too(tmp_path: Path) -> None:
     with db.connect() as conn:
         tile_count = conn.execute("SELECT COUNT(*) FROM bad_hash_tiles WHERE bad_hash_id = ?", (bad_id,)).fetchone()[0]
     assert tile_count == 0
+
+
+def test_bad_hash_round_trips_crop_hash_orb_descriptor_and_variant(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+    db.migrate()
+
+    bad_id = db.add_bad_hash(
+        BadHash(
+            label="manual_bad",
+            sha256="a" * 64,
+            phash="b" * 16,
+            source_file="bad.jpg",
+            tile_phashes=("1" * 16,),
+            crop_hash="c" * 16,
+            orb_descriptor=b"orb-bytes",
+            variant="rotate_90",
+        )
+    )
+
+    loaded = db.get_bad_hashes()[0]
+
+    assert loaded.id == bad_id
+    assert loaded.crop_hash == "c" * 16
+    assert loaded.orb_descriptor == b"orb-bytes"
+    assert loaded.variant == "rotate_90"

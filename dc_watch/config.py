@@ -25,6 +25,13 @@ class AppConfig:
     tile_phash_grid_size: int = 3
     tile_phash_threshold: int = 6
     tile_phash_min_matches: int = 1
+    enable_crop_resistant_hash: bool = True
+    crop_hash_region_cutoff: int = 1
+    crop_hash_hamming_cutoff: int = 16
+    enable_orb_matching: bool = True
+    orb_max_features: int = 500
+    orb_distance_threshold: int = 64
+    orb_min_matches: int = 12
     enable_nudenet: bool = False
     nude_score_threshold: float = 0.45
     alert_on_analysis_failure: bool = False

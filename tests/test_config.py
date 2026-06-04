@@ -18,6 +18,13 @@ def test_default_config_uses_requested_safety_defaults(tmp_path: Path) -> None:
     assert config.tile_phash_grid_size == 3
     assert config.tile_phash_threshold == 6
     assert config.tile_phash_min_matches == 1
+    assert config.enable_crop_resistant_hash is True
+    assert config.crop_hash_region_cutoff == 1
+    assert config.crop_hash_hamming_cutoff == 16
+    assert config.enable_orb_matching is True
+    assert config.orb_max_features == 500
+    assert config.orb_distance_threshold == 64
+    assert config.orb_min_matches == 12
     assert config.enable_nudenet is False
     assert config.nude_score_threshold == 0.45
     assert config.alert_on_analysis_failure is False

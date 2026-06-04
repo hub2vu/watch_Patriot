@@ -9,6 +9,10 @@ try:
     hiddenimports += collect_submodules("nudenet")
 except Exception:
     pass
+try:
+    hiddenimports += collect_submodules("cv2")
+except Exception:
+    pass
 
 a = Analysis(
     ["dc_watch_gui_launcher.py"],

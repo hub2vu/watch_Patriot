@@ -20,10 +20,11 @@ dependencies = [
 
 [project.optional-dependencies]
 nude = ["nudenet>=3.4"]
+orb = ["opencv-python-headless>=4.9"]
 tray = ["pystray>=0.19"]
 build = ["pyinstaller>=6.0"]
-dev = ["pytest>=8.0", "pyinstaller>=6.0"]
-all = ["nudenet>=3.4", "pystray>=0.19", "pytest>=8.0", "pyinstaller>=6.0"]
+dev = ["pytest>=8.0", "pyinstaller>=6.0", "opencv-python-headless>=4.9"]
+all = ["nudenet>=3.4", "opencv-python-headless>=4.9", "pystray>=0.19", "pytest>=8.0", "pyinstaller>=6.0"]
 
 [project.scripts]
 dc-watch = "dc_watch.cli:main"

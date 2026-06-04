@@ -40,6 +40,8 @@ SCHEMA = (
         post_no TEXT,
         sha256 TEXT,
         phash TEXT,
+        crop_hash TEXT,
+        orb_descriptor BLOB,
         created_at INTEGER
     )
     """,
@@ -58,6 +60,9 @@ SCHEMA = (
         label TEXT,
         sha256 TEXT,
         phash TEXT,
+        crop_hash TEXT,
+        orb_descriptor BLOB,
+        variant TEXT DEFAULT 'original',
         source_post_no TEXT,
         source_file TEXT,
         added_at INTEGER
@@ -88,6 +93,11 @@ class Database:
         with self.connect() as conn:
             for statement in SCHEMA:
                 conn.execute(statement)
+            _ensure_column(conn, "post_image_hashes", "crop_hash", "TEXT")
+            _ensure_column(conn, "post_image_hashes", "orb_descriptor", "BLOB")
+            _ensure_column(conn, "bad_hashes", "crop_hash", "TEXT")
+            _ensure_column(conn, "bad_hashes", "orb_descriptor", "BLOB")
+            _ensure_column(conn, "bad_hashes", "variant", "TEXT DEFAULT 'original'")
             conn.commit()
 
     def stats(self) -> dict[str, int]:
@@ -129,8 +139,8 @@ class Database:
         with self.connect() as conn:
             for record in records:
                 cursor = conn.execute(
-                    "INSERT INTO post_image_hashes(post_no, sha256, phash, created_at) VALUES(?, ?, ?, ?)",
-                    (post_no, record.sha256, record.phash, now),
+                    "INSERT INTO post_image_hashes(post_no, sha256, phash, crop_hash, orb_descriptor, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                    (post_no, record.sha256, record.phash, record.crop_hash, record.orb_descriptor, now),
                 )
                 image_hash_id = int(cursor.lastrowid)
                 conn.executemany(
@@ -142,7 +152,7 @@ class Database:
     def get_post_image_hashes(self, post_no: str) -> list[ImageHashRecord]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, sha256, phash FROM post_image_hashes WHERE post_no = ? ORDER BY id",
+                "SELECT id, sha256, phash, crop_hash, orb_descriptor FROM post_image_hashes WHERE post_no = ? ORDER BY id",
                 (post_no,),
             ).fetchall()
             tile_rows = conn.execute(
@@ -152,7 +162,16 @@ class Database:
         tiles_by_hash: dict[int, list[str]] = {}
         for row in tile_rows:
             tiles_by_hash.setdefault(int(row["post_image_hash_id"]), []).append(row["phash"])
-        return [ImageHashRecord(sha256=row["sha256"], phash=row["phash"], tile_phashes=tuple(tiles_by_hash.get(int(row["id"]), []))) for row in rows]
+        return [
+            ImageHashRecord(
+                sha256=row["sha256"],
+                phash=row["phash"],
+                crop_hash=row["crop_hash"],
+                orb_descriptor=row["orb_descriptor"],
+                tile_phashes=tuple(tiles_by_hash.get(int(row["id"]), [])),
+            )
+            for row in rows
+        ]
 
     def add_alert(self, alert: Alert) -> None:
         alerted_at = alert.alerted_at or _now()
@@ -211,13 +230,16 @@ class Database:
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO bad_hashes(label, sha256, phash, source_post_no, source_file, added_at)
-                VALUES(?, ?, ?, ?, ?, ?)
+                INSERT INTO bad_hashes(label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, added_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     bad_hash.label,
                     bad_hash.sha256,
                     bad_hash.phash,
+                    bad_hash.crop_hash,
+                    bad_hash.orb_descriptor,
+                    bad_hash.variant,
                     bad_hash.source_post_no,
                     bad_hash.source_file,
                     bad_hash.added_at or _now(),
@@ -236,7 +258,15 @@ class Database:
         count = 0
         for record in records:
             self.add_bad_hash(
-                BadHash(label=label, sha256=record.sha256, phash=record.phash, source_post_no=post_no, tile_phashes=record.tile_phashes)
+                BadHash(
+                    label=label,
+                    sha256=record.sha256,
+                    phash=record.phash,
+                    crop_hash=record.crop_hash,
+                    orb_descriptor=record.orb_descriptor,
+                    source_post_no=post_no,
+                    tile_phashes=record.tile_phashes,
+                )
             )
             count += 1
         return count
@@ -244,7 +274,7 @@ class Database:
     def get_bad_hashes(self) -> list[BadHash]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, label, sha256, phash, source_post_no, source_file, added_at FROM bad_hashes ORDER BY id"
+                "SELECT id, label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, added_at FROM bad_hashes ORDER BY id"
             ).fetchall()
             tile_rows = conn.execute("SELECT bad_hash_id, phash FROM bad_hash_tiles ORDER BY bad_hash_id, tile_index").fetchall()
         tiles_by_bad_hash: dict[int, list[str]] = {}
@@ -256,6 +286,9 @@ class Database:
                 label=row["label"],
                 sha256=row["sha256"],
                 phash=row["phash"],
+                crop_hash=row["crop_hash"],
+                orb_descriptor=row["orb_descriptor"],
+                variant=row["variant"] or "original",
                 source_post_no=row["source_post_no"],
                 source_file=row["source_file"],
                 added_at=row["added_at"],
@@ -291,3 +324,9 @@ def _alert_from_row(row: sqlite3.Row) -> Alert:
 
 def _now() -> int:
     return int(time.time())
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")

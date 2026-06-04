@@ -64,6 +64,13 @@ class DCWatchApp:
         self._add_entry(settings, "tile_phash_grid_size", "타일 pHash grid size", int)
         self._add_entry(settings, "tile_phash_threshold", "타일 pHash threshold", int)
         self._add_entry(settings, "tile_phash_min_matches", "타일 pHash 최소 매칭 수", int)
+        self._add_check(settings, "enable_crop_resistant_hash", "crop-resistant hash")
+        self._add_entry(settings, "crop_hash_region_cutoff", "crop hash region cutoff", int)
+        self._add_entry(settings, "crop_hash_hamming_cutoff", "crop hash hamming cutoff", int)
+        self._add_check(settings, "enable_orb_matching", "OpenCV ORB matching")
+        self._add_entry(settings, "orb_max_features", "ORB max features", int)
+        self._add_entry(settings, "orb_distance_threshold", "ORB distance threshold", int)
+        self._add_entry(settings, "orb_min_matches", "ORB min matches", int)
         self._add_check(settings, "enable_nudenet", "NudeNet/CNN nudity detection")
         self._add_entry(settings, "nude_score_threshold", "NudeNet score threshold", float)
         self._add_check(settings, "alert_on_analysis_failure", "분석 실패도 warning 팝업")
@@ -125,6 +132,13 @@ class DCWatchApp:
             tile_phash_grid_size=int(str(self.vars["tile_phash_grid_size"].get())),
             tile_phash_threshold=int(str(self.vars["tile_phash_threshold"].get())),
             tile_phash_min_matches=int(str(self.vars["tile_phash_min_matches"].get())),
+            enable_crop_resistant_hash=bool(self.vars["enable_crop_resistant_hash"].get()),
+            crop_hash_region_cutoff=int(str(self.vars["crop_hash_region_cutoff"].get())),
+            crop_hash_hamming_cutoff=int(str(self.vars["crop_hash_hamming_cutoff"].get())),
+            enable_orb_matching=bool(self.vars["enable_orb_matching"].get()),
+            orb_max_features=int(str(self.vars["orb_max_features"].get())),
+            orb_distance_threshold=int(str(self.vars["orb_distance_threshold"].get())),
+            orb_min_matches=int(str(self.vars["orb_min_matches"].get())),
             enable_nudenet=bool(self.vars["enable_nudenet"].get()),
             nude_score_threshold=float(str(self.vars["nude_score_threshold"].get())),
             alert_on_analysis_failure=bool(self.vars["alert_on_analysis_failure"].get()),
@@ -246,22 +260,28 @@ class DCWatchApp:
         win = tk.Toplevel(self.root)
         win.title("bad hash DB 관리")
         win.geometry("920x420")
-        columns = ("id", "label", "source_post_no", "source_file", "tiles", "added_at")
+        columns = ("id", "label", "variant", "source_post_no", "source_file", "tiles", "crop", "orb", "added_at")
         tree = ttk.Treeview(win, columns=columns, show="headings")
         headings = {
             "id": "id",
             "label": "label",
+            "variant": "variant",
             "source_post_no": "source post",
             "source_file": "source file",
             "tiles": "tile hashes",
+            "crop": "crop hash",
+            "orb": "ORB",
             "added_at": "added at",
         }
         widths = {
             "id": 70,
             "label": 220,
+            "variant": 150,
             "source_post_no": 120,
             "source_file": 220,
             "tiles": 90,
+            "crop": 80,
+            "orb": 80,
             "added_at": 160,
         }
         for column, text in headings.items():
@@ -284,9 +304,12 @@ class DCWatchApp:
                     values=(
                         bad_hash.id,
                         bad_hash.label,
+                        bad_hash.variant,
                         bad_hash.source_post_no or "",
                         source_file,
                         len(bad_hash.tile_phashes),
+                        "yes" if bad_hash.crop_hash else "no",
+                        "yes" if bad_hash.orb_descriptor else "no",
                         added_at,
                     ),
                 )
@@ -420,13 +443,13 @@ class DCWatchApp:
         if not ok:
             return
         try:
-            bad_id = remember_file(self.db, path, label, self.config)
+            bad_ids = remember_file(self.db, path, label, self.config)
         except Exception as exc:
             messagebox.showerror("등록 실패", f"이미지 해시 등록 실패: {exc.__class__.__name__}", parent=self.root)
             self.status_var.set(f"로컬 이미지 해시 DB 등록 실패: {exc.__class__.__name__}")
             return
-        self.status_var.set(f"로컬 이미지 해시 DB 등록 완료: id={bad_id}")
-        messagebox.showinfo("등록 완료", f"bad hash DB에 등록했습니다.\n\nid={bad_id}", parent=self.root)
+        self.status_var.set(f"로컬 이미지 해시 DB 등록 완료: {len(bad_ids)}개 variant")
+        messagebox.showinfo("등록 완료", f"bad hash DB에 등록했습니다.\n\nvariant records={len(bad_ids)}", parent=self.root)
 
     def on_close(self) -> None:
         self.stop_watch()

@@ -13,7 +13,7 @@ from .autostart import install_autostart, uninstall_autostart
 from .config import AppConfig, ensure_user_files, load_config
 from .db import Database
 from .dcinside import download_image_bytes, fetch_post_image_urls, fetch_recent_posts
-from .image_scan import compute_phash, compute_sha256, compute_tile_phashes, scan_post_images
+from .image_scan import build_bad_hash_records_from_file, scan_post_images
 from .local_popup import enqueue_popup, show_test_popup
 from .logging_setup import setup_logging
 from .models import Alert, BadHash, ImageHashRecord, Post, Risk
@@ -51,8 +51,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"registered {count} image hash record(s) from post {args.post_no}")
         return 0 if count else 1
     if args.command == "remember-file":
-        bad_id = remember_file(db, Path(args.image_path), args.label, config)
-        print(f"registered bad hash id {bad_id} from file {args.image_path}")
+        bad_ids = remember_file(db, Path(args.image_path), args.label, config)
+        print(f"registered {len(bad_ids)} bad hash variant record(s) from file {args.image_path}")
         return 0
     if args.command == "stats":
         for key, value in db.stats().items():
@@ -288,21 +288,9 @@ def scan_post(config: AppConfig, db: Database, post: Post) -> Alert | None:
     return None
 
 
-def remember_file(db: Database, image_path: Path, label: str, config: AppConfig | None = None) -> int:
+def remember_file(db: Database, image_path: Path, label: str, config: AppConfig | None = None) -> list[int]:
     config = config or AppConfig()
-    data = image_path.read_bytes()
-    sha = compute_sha256(data)
-    try:
-        phash = compute_phash(data)
-    except Exception:
-        phash = None
-    tile_phashes: tuple[str, ...] = ()
-    if phash and config.enable_tile_phash:
-        try:
-            tile_phashes = tuple(compute_tile_phashes(data, config.tile_phash_grid_size))
-        except Exception:
-            tile_phashes = ()
-    return db.add_bad_hash(BadHash(label=label, sha256=sha, phash=phash, source_file=str(image_path), tile_phashes=tile_phashes))
+    return [db.add_bad_hash(record) for record in build_bad_hash_records_from_file(image_path, label, config)]
 
 
 def _show_alert(config: AppConfig, db: Database, alert: Alert, popup_handler: PopupHandler | None) -> None:

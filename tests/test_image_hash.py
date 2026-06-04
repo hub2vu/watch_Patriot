@@ -3,7 +3,17 @@ from io import BytesIO
 from PIL import Image, ImageDraw
 
 from dc_watch.config import AppConfig
-from dc_watch.image_scan import compute_phash, compute_sha256, compute_tile_phashes, phash_distance, scan_image, scan_post_images
+from dc_watch.image_scan import (
+    build_bad_hash_records_from_file,
+    compute_crop_resistant_hash,
+    compute_phash,
+    compute_sha256,
+    compute_tile_phashes,
+    generate_image_variants,
+    phash_distance,
+    scan_image,
+    scan_post_images,
+)
 from dc_watch.models import BadHash
 
 
@@ -89,6 +99,51 @@ def test_tile_phash_matches_cropped_reupload() -> None:
 
     assert result.risk == "high"
     assert any("tile pHash" in reason for reason in result.reasons)
+
+
+def test_generate_image_variants_includes_rotations_and_flips() -> None:
+    variants = generate_image_variants(_pattern_grid_png_bytes())
+    names = {variant.name for variant in variants}
+
+    assert {
+        "original",
+        "rotate_90",
+        "rotate_180",
+        "rotate_270",
+        "flip_left_right",
+        "flip_left_right_rotate_90",
+        "flip_left_right_rotate_180",
+        "flip_left_right_rotate_270",
+    }.issubset(names)
+    assert len(variants) >= 8
+
+
+def test_scan_image_marks_crop_resistant_hash_match_as_high() -> None:
+    original = _pattern_grid_png_bytes()
+    crop = _crop_png_bytes(original, box=(0, 0, 64, 64))
+    bad = BadHash(label="known_crop_source", crop_hash=compute_crop_resistant_hash(original))
+
+    result = scan_image(
+        crop,
+        [bad],
+        AppConfig(enable_crop_resistant_hash=True, crop_hash_hamming_cutoff=16, crop_hash_region_cutoff=1),
+    )
+
+    assert result.risk == "high"
+    assert any("crop-resistant" in reason for reason in result.reasons)
+
+
+def test_build_bad_hash_records_from_file_stores_variant_crop_and_tile_hashes(tmp_path) -> None:
+    image_path = tmp_path / "bad.png"
+    image_path.write_bytes(_pattern_grid_png_bytes())
+
+    records = build_bad_hash_records_from_file(image_path, "known", AppConfig(enable_tile_phash=True, enable_crop_resistant_hash=True))
+
+    assert len(records) >= 8
+    assert {record.variant for record in records} >= {"original", "rotate_90", "flip_left_right"}
+    assert all(record.source_file == str(image_path) for record in records)
+    assert all(record.crop_hash for record in records)
+    assert all(record.tile_phashes for record in records)
 
 
 def _pattern_grid_png_bytes() -> bytes:
