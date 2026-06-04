@@ -173,6 +173,27 @@ class Database:
             for row in rows
         ]
 
+    def get_post(self, post_no: str) -> Post | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT post_no, title, url, writer FROM alerts WHERE post_no = ?",
+                (post_no,),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT post_no, title, url, writer FROM seen_posts WHERE post_no = ?",
+                    (post_no,),
+                ).fetchone()
+        if row is None:
+            return None
+        return Post(
+            post_no=row["post_no"],
+            title=row["title"] or "",
+            url=row["url"] or "",
+            writer=row["writer"] or "",
+            has_image=True,
+        )
+
     def add_alert(self, alert: Alert) -> None:
         alerted_at = alert.alerted_at or _now()
         with self.connect() as conn:

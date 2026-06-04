@@ -13,7 +13,7 @@ from .autostart import install_autostart, uninstall_autostart
 from .config import AppConfig, ensure_user_files, load_config
 from .db import Database
 from .dcinside import download_image_bytes, fetch_post_image_urls, fetch_recent_posts
-from .image_scan import build_bad_hash_records_from_file, scan_post_images
+from .image_scan import build_bad_hash_records_from_bytes, build_bad_hash_records_from_file, scan_post_images
 from .local_popup import enqueue_popup, show_test_popup
 from .logging_setup import setup_logging
 from .models import Alert, BadHash, ImageHashRecord, Post, Risk
@@ -47,9 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "once":
         return run_watch(config, db=db, once=True)
     if args.command == "remember-post":
-        count = db.remember_post_hashes(args.post_no, args.label)
-        print(f"registered {count} image hash record(s) from post {args.post_no}")
-        return 0 if count else 1
+        bad_ids = remember_post(db, args.post_no, args.label, config)
+        print(f"registered {len(bad_ids)} bad hash record(s) from post {args.post_no}")
+        return 0 if bad_ids else 1
     if args.command == "remember-file":
         bad_ids = remember_file(db, Path(args.image_path), args.label, config)
         print(f"registered {len(bad_ids)} bad hash variant record(s) from file {args.image_path}")
@@ -293,6 +293,27 @@ def remember_file(db: Database, image_path: Path, label: str, config: AppConfig 
     return [db.add_bad_hash(record) for record in build_bad_hash_records_from_file(image_path, label, config)]
 
 
+def remember_post(db: Database, post_no: str, label: str, config: AppConfig | None = None) -> list[int]:
+    config = config or AppConfig()
+    post = db.get_post(post_no)
+    if post is not None and post.url:
+        try:
+            bad_ids: list[int] = []
+            for image_url in fetch_post_image_urls(post.url):
+                data = download_image_bytes(image_url, referer=post.url, max_bytes=config.max_image_bytes)
+                for record in build_bad_hash_records_from_bytes(data, label, config, source_post_no=post_no):
+                    bad_ids.append(db.add_bad_hash(record))
+            if bad_ids:
+                return bad_ids
+        except Exception as exc:
+            log.warning("enhanced remember-post failed for %s: %s", post_no, exc.__class__.__name__)
+    fallback_count = db.remember_post_hashes(post_no, label)
+    bad_hashes = db.get_bad_hashes()
+    if fallback_count <= 0:
+        return []
+    return [bad_hash.id for bad_hash in bad_hashes[-fallback_count:] if bad_hash.id is not None]
+
+
 def _show_alert(config: AppConfig, db: Database, alert: Alert, popup_handler: PopupHandler | None) -> None:
     if popup_handler:
         popup_handler(alert)
@@ -300,8 +321,8 @@ def _show_alert(config: AppConfig, db: Database, alert: Alert, popup_handler: Po
 
     def remember(selected: Alert) -> None:
         label = f"confirmed_{selected.post_no}_{int(time.time())}"
-        count = db.remember_post_hashes(selected.post_no, label)
-        log.info("registered %s hash record(s) from post %s", count, selected.post_no)
+        ids = remember_post(db, selected.post_no, label, config)
+        log.info("registered %s hash record(s) from post %s", len(ids), selected.post_no)
 
     enqueue_popup(alert, topmost=(config.topmost_popup or alert.risk == "high"), on_remember_bad_hash=remember)
 

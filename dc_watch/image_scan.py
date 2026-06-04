@@ -242,9 +242,18 @@ def generate_image_variants(data: bytes) -> list[ImageVariant]:
 
 
 def build_bad_hash_records_from_file(image_path: Path, label: str, config: AppConfig) -> list[BadHash]:
-    source_data = image_path.read_bytes()
+    return build_bad_hash_records_from_bytes(image_path.read_bytes(), label, config, source_file=str(image_path))
+
+
+def build_bad_hash_records_from_bytes(
+    data: bytes,
+    label: str,
+    config: AppConfig,
+    source_post_no: str | None = None,
+    source_file: str | None = None,
+) -> list[BadHash]:
     records: list[BadHash] = []
-    for variant in generate_image_variants(source_data):
+    for variant in generate_image_variants(data):
         sha = compute_sha256(variant.data)
         try:
             phash = compute_phash(variant.data)
@@ -271,7 +280,8 @@ def build_bad_hash_records_from_file(image_path: Path, label: str, config: AppCo
                 crop_hash=crop_hash,
                 orb_descriptor=orb_descriptor,
                 variant=variant.name,
-                source_file=str(image_path),
+                source_post_no=source_post_no,
+                source_file=source_file,
                 tile_phashes=tile_phashes,
             )
         )

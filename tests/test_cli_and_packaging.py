@@ -1,6 +1,12 @@
+from io import BytesIO
 from pathlib import Path
 
-from dc_watch.cli import build_parser
+from PIL import Image
+
+from dc_watch.cli import build_parser, remember_post
+from dc_watch.config import AppConfig
+from dc_watch.db import Database
+from dc_watch.models import ImageHashRecord, Post
 
 
 def test_cli_commands_are_registered_without_test_alert_name() -> None:

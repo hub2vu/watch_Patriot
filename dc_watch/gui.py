@@ -7,7 +7,7 @@ import webbrowser
 from pathlib import Path
 
 from .autostart import install_autostart, uninstall_autostart
-from .cli import remember_file, run_watch
+from .cli import remember_file, remember_post, run_watch
 from .config import AppConfig, ensure_user_files, load_config, save_config
 from .db import Database
 from .image_scan import reset_nudenet_detector
@@ -472,8 +472,8 @@ class DCWatchApp:
 
     def _remember_alert_confirmed(self, alert: Alert) -> None:
         label = f"confirmed_{alert.post_no}_{int(time.time())}"
-        count = self.db.remember_post_hashes(alert.post_no, label)
-        self.status_var.set(f"해시 DB 등록: {count}개")
+        ids = remember_post(self.db, alert.post_no, label, self.config)
+        self.status_var.set(f"해시 DB 등록: {len(ids)}개")
 
     def _set_status_threadsafe(self, message: str) -> None:
         self.root.after(0, lambda: self.status_var.set(message))
