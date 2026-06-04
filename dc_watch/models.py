@@ -71,3 +71,4 @@ class Alert:
     reasons: list[str]
     alerted_at: int = 0
     acknowledged_at: int | None = None
+    false_positive_at: int | None = None

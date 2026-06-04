@@ -227,7 +227,7 @@ class DCWatchApp:
                     alert.risk,
                     "; ".join(alert.reasons[:2]),
                     time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(alert.alerted_at or 0)),
-                    "확인" if alert.acknowledged_at else "미확인",
+                    self._alert_status_text(alert),
                 ),
             )
         tree.pack(fill="both", expand=True, padx=8, pady=8)
@@ -250,6 +250,13 @@ class DCWatchApp:
                 win.destroy()
                 self.show_recent_alerts()
 
+        def mark_false_positive() -> None:
+            alert = selected()
+            if alert:
+                self.db.mark_alert_false_positive(alert.post_no)
+                win.destroy()
+                self.show_recent_alerts()
+
         def remember() -> None:
             alert = selected()
             if alert:
@@ -257,7 +264,16 @@ class DCWatchApp:
 
         ttk.Button(buttons, text="게시글 열기", command=open_post).pack(side="left")
         ttk.Button(buttons, text="확인 처리", command=acknowledge).pack(side="left", padx=4)
+        ttk.Button(buttons, text="오탐 처리", command=mark_false_positive).pack(side="left", padx=4)
         ttk.Button(buttons, text="확정 테러 해시 DB에 등록", command=remember).pack(side="left", padx=4)
+
+    @staticmethod
+    def _alert_status_text(alert: Alert) -> str:
+        if alert.false_positive_at:
+            return "오탐"
+        if alert.acknowledged_at:
+            return "확인"
+        return "미확인"
 
     def show_bad_hash_manager(self) -> None:
         from tkinter import messagebox

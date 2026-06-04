@@ -38,7 +38,8 @@ SCHEMA = (
         url TEXT,
         writer TEXT,
         image_count INTEGER,
-        reasons_json TEXT
+        reasons_json TEXT,
+        false_positive_at INTEGER
     )
     """,
     """
@@ -107,6 +108,7 @@ class Database:
             _ensure_column(conn, "bad_hashes", "orb_descriptor", "BLOB")
             _ensure_column(conn, "bad_hashes", "variant", "TEXT DEFAULT 'original'")
             _ensure_column(conn, "bad_hashes", "seed_key", "TEXT")
+            _ensure_column(conn, "alerts", "false_positive_at", "INTEGER")
             conn.commit()
         if not _env_flag(SKIP_BUNDLED_SEED_ENV):
             self.import_bundled_bad_hashes()
@@ -210,8 +212,8 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO alerts(post_no, alerted_at, acknowledged_at, risk, title, url, writer, image_count, reasons_json)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO alerts(post_no, alerted_at, acknowledged_at, risk, title, url, writer, image_count, reasons_json, false_positive_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(post_no) DO UPDATE SET
                     alerted_at = excluded.alerted_at,
                     risk = excluded.risk,
@@ -219,7 +221,8 @@ class Database:
                     url = excluded.url,
                     writer = excluded.writer,
                     image_count = excluded.image_count,
-                    reasons_json = excluded.reasons_json
+                    reasons_json = excluded.reasons_json,
+                    false_positive_at = COALESCE(excluded.false_positive_at, alerts.false_positive_at)
                 """,
                 (
                     alert.post_no,
@@ -231,6 +234,7 @@ class Database:
                     alert.writer,
                     alert.image_count,
                     json.dumps(alert.reasons, ensure_ascii=False),
+                    alert.false_positive_at,
                 ),
             )
             conn.commit()
@@ -245,12 +249,24 @@ class Database:
             conn.execute("UPDATE alerts SET acknowledged_at = ? WHERE post_no = ?", (_now(), post_no))
             conn.commit()
 
-    def recent_alerts(self, limit: int = 50) -> list[Alert]:
+    def mark_alert_false_positive(self, post_no: str) -> bool:
+        now = _now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE alerts SET false_positive_at = ? WHERE post_no = ? AND false_positive_at IS NULL",
+                (now, post_no),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def recent_alerts(self, limit: int = 50, include_false_positives: bool = False) -> list[Alert]:
+        where = "" if include_false_positives else "WHERE false_positive_at IS NULL"
         with self.connect() as conn:
             rows = conn.execute(
-                """
-                SELECT post_no, alerted_at, acknowledged_at, risk, title, url, writer, image_count, reasons_json
+                f"""
+                SELECT post_no, alerted_at, acknowledged_at, false_positive_at, risk, title, url, writer, image_count, reasons_json
                 FROM alerts
+                {where}
                 ORDER BY alerted_at DESC
                 LIMIT ?
                 """,
@@ -407,6 +423,7 @@ def _alert_from_row(row: sqlite3.Row) -> Alert:
         reasons=json.loads(row["reasons_json"] or "[]"),
         alerted_at=int(row["alerted_at"] or 0),
         acknowledged_at=row["acknowledged_at"],
+        false_positive_at=row["false_positive_at"],
     )
 
 

@@ -70,6 +70,31 @@ def test_acknowledge_alert_marks_alert(tmp_path: Path) -> None:
     assert recent[0].acknowledged_at is not None
 
 
+def test_mark_alert_false_positive_hides_alert_from_recent_default(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+    db.migrate()
+    false_positive = Alert(post_no="1", title="fp", url="https://example.com/fp", writer="", risk="high", image_count=1, reasons=["weak match"])
+    real_alert = Alert(post_no="2", title="real", url="https://example.com/real", writer="", risk="high", image_count=1, reasons=["sha"])
+
+    db.add_alert(false_positive)
+    db.add_alert(real_alert)
+    assert db.mark_alert_false_positive("1") is True
+
+    visible = db.recent_alerts(limit=5)
+    all_alerts = db.recent_alerts(limit=5, include_false_positives=True)
+
+    assert [alert.post_no for alert in visible] == ["2"]
+    marked = {alert.post_no: alert for alert in all_alerts}["1"]
+    assert marked.false_positive_at is not None
+
+
+def test_mark_alert_false_positive_returns_false_for_missing_alert(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+    db.migrate()
+
+    assert db.mark_alert_false_positive("missing") is False
+
+
 def test_delete_bad_hash_removes_tiles_too(tmp_path: Path) -> None:
     db = Database(tmp_path / "watch.sqlite3")
     db.migrate()
