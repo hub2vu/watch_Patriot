@@ -62,11 +62,13 @@ class DCWatchApp:
         self._add_entry(settings, "jitter_seconds", "큐 처리 간격 초", int)
         self._add_entry(settings, "pages_to_scan", "스캔 페이지 수", int)
         self._add_check(settings, "scan_existing_on_first_run", "첫 실행 시 기존 글 검사")
+        self._add_entry(settings, "phash_strict_threshold", "pHash strict threshold", int)
         self._add_entry(settings, "phash_threshold", "pHash threshold", int)
         self._add_check(settings, "enable_tile_phash", "크롭 대응 타일 pHash 사용")
         self._add_entry(settings, "tile_phash_grid_size", "타일 pHash grid size", int)
         self._add_entry(settings, "tile_phash_threshold", "타일 pHash threshold", int)
         self._add_entry(settings, "tile_phash_min_matches", "타일 pHash 최소 매칭 수", int)
+        self._add_check(settings, "tile_phash_single_match_is_weak", "단일 타일 pHash는 보조 신호")
         self._add_check(settings, "enable_crop_resistant_hash", "crop-resistant hash")
         self._add_entry(settings, "crop_hash_region_cutoff", "crop hash region cutoff", int)
         self._add_entry(settings, "crop_hash_hamming_cutoff", "crop hash hamming cutoff", int)
@@ -130,11 +132,13 @@ class DCWatchApp:
             jitter_seconds=int(str(self.vars["jitter_seconds"].get())),
             pages_to_scan=int(str(self.vars["pages_to_scan"].get())),
             scan_existing_on_first_run=bool(self.vars["scan_existing_on_first_run"].get()),
+            phash_strict_threshold=int(str(self.vars["phash_strict_threshold"].get())),
             phash_threshold=int(str(self.vars["phash_threshold"].get())),
             enable_tile_phash=bool(self.vars["enable_tile_phash"].get()),
             tile_phash_grid_size=int(str(self.vars["tile_phash_grid_size"].get())),
             tile_phash_threshold=int(str(self.vars["tile_phash_threshold"].get())),
             tile_phash_min_matches=int(str(self.vars["tile_phash_min_matches"].get())),
+            tile_phash_single_match_is_weak=bool(self.vars["tile_phash_single_match_is_weak"].get()),
             enable_crop_resistant_hash=bool(self.vars["enable_crop_resistant_hash"].get()),
             crop_hash_region_cutoff=int(str(self.vars["crop_hash_region_cutoff"].get())),
             crop_hash_hamming_cutoff=int(str(self.vars["crop_hash_hamming_cutoff"].get())),

@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -26,6 +26,28 @@ _DETECTOR_READY: bool | None = None
 class ImageVariant:
     name: str
     data: bytes
+
+
+@dataclass
+class _SeedEvidence:
+    strong_reasons: list[str] = field(default_factory=list)
+    weak_reasons_by_kind: dict[str, list[str]] = field(default_factory=dict)
+
+    def add_strong(self, reason: str) -> None:
+        self.strong_reasons.append(reason)
+
+    def add_weak(self, kind: str, reason: str) -> None:
+        self.weak_reasons_by_kind.setdefault(kind, []).append(reason)
+
+    @property
+    def weak_kind_count(self) -> int:
+        return len(self.weak_reasons_by_kind)
+
+    def weak_reasons(self) -> list[str]:
+        reasons: list[str] = []
+        for kind_reasons in self.weak_reasons_by_kind.values():
+            reasons.extend(kind_reasons)
+        return reasons
 
 
 def compute_sha256(data: bytes) -> str:
@@ -151,41 +173,54 @@ def scan_image(data: bytes, bad_hashes: list[BadHash], config: AppConfig) -> Ima
     if config.enable_orb_matching:
         orb_descriptor = compute_orb_descriptor(data, config.orb_max_features)
 
+    evidence_by_seed: dict[str, _SeedEvidence] = {}
+
     for bad_hash in bad_hashes:
+        seed_evidence = evidence_by_seed.setdefault(_bad_hash_seed_key(bad_hash), _SeedEvidence())
         bad_label = _bad_hash_display_label(bad_hash)
-        strong_reasons: list[str] = []
-        weak_reasons: list[str] = []
         if bad_hash.sha256 and bad_hash.sha256.lower() == sha.lower():
-            strong_reasons.append(f"bad SHA-256 match: {bad_label}")
+            seed_evidence.add_strong(f"bad SHA-256 match: {bad_label}")
         if phash and bad_hash.phash:
             try:
                 distance = phash_distance(phash, bad_hash.phash)
             except ValueError:
                 distance = config.phash_threshold + 1
-            if distance <= config.phash_threshold:
-                strong_reasons.append(f"bad pHash match: {bad_label} distance={distance}")
+            strict_threshold = max(0, min(config.phash_strict_threshold, config.phash_threshold))
+            if distance <= strict_threshold:
+                seed_evidence.add_strong(f"bad pHash strict match: {bad_label} distance={distance}")
+            elif distance <= config.phash_threshold:
+                seed_evidence.add_weak("phash_borderline", f"bad borderline pHash match: {bad_label} distance={distance}")
         if config.enable_tile_phash and phash and bad_hash.tile_phashes:
             match_count = _tile_phash_match_count(
-                [phash, *tile_phashes],
+                tile_phashes,
                 bad_hash.tile_phashes,
                 config.tile_phash_threshold,
             )
-            if match_count >= max(1, config.tile_phash_min_matches):
-                strong_reasons.append(f"bad tile pHash match: {bad_label} matches={match_count}")
+            if match_count > 0:
+                reason = f"bad tile pHash match: {bad_label} matches={match_count}"
+                if _tile_phash_match_is_strong(match_count, config):
+                    seed_evidence.add_strong(reason)
+                else:
+                    seed_evidence.add_weak("tile_phash", reason)
         if config.enable_crop_resistant_hash and crop_hash and bad_hash.crop_hash:
             try:
                 if crop_hash_matches(crop_hash, bad_hash.crop_hash, config.crop_hash_region_cutoff, config.crop_hash_hamming_cutoff):
-                    weak_reasons.append(f"bad crop-resistant hash match: {bad_label}")
+                    seed_evidence.add_weak("crop_hash", f"bad crop-resistant hash match: {bad_label}")
             except (ValueError, TypeError):
                 pass
         if config.enable_orb_matching and orb_descriptor and bad_hash.orb_descriptor:
             matches = orb_match_count(orb_descriptor, bad_hash.orb_descriptor, config.orb_distance_threshold)
             if matches >= max(1, config.orb_min_matches):
-                weak_reasons.append(f"bad ORB feature match: {bad_label} matches={matches}")
-        if strong_reasons or len(weak_reasons) >= 2:
+                seed_evidence.add_weak("orb_feature", f"bad ORB feature match: {bad_label} matches={matches}")
+
+    for seed_evidence in evidence_by_seed.values():
+        if seed_evidence.strong_reasons:
             risk = "high"
-            reasons.extend(strong_reasons)
-            reasons.extend(weak_reasons)
+            reasons.extend(seed_evidence.strong_reasons)
+            reasons.extend(seed_evidence.weak_reasons())
+        elif seed_evidence.weak_kind_count >= 2:
+            risk = "high"
+            reasons.extend(seed_evidence.weak_reasons())
 
     if config.enable_nudenet:
         nude_reasons = detect_nudity(data, config.nude_score_threshold)
@@ -368,6 +403,13 @@ def _tile_phash_match_count(candidate_phashes: Iterable[str], bad_tile_phashes: 
     return len(used_bad_indexes)
 
 
+def _tile_phash_match_is_strong(match_count: int, config: AppConfig) -> bool:
+    minimum = max(1, int(config.tile_phash_min_matches))
+    if config.tile_phash_single_match_is_weak:
+        minimum = max(2, minimum)
+    return match_count >= minimum
+
+
 def _image_to_png_bytes(image: Image.Image) -> bytes:
     stream = BytesIO()
     image.save(stream, format="PNG")
@@ -378,6 +420,10 @@ def _bad_hash_display_label(bad_hash: BadHash) -> str:
     if bad_hash.variant and bad_hash.variant != "original":
         return f"{bad_hash.label}/{bad_hash.variant}"
     return bad_hash.label
+
+
+def _bad_hash_seed_key(bad_hash: BadHash) -> str:
+    return bad_hash.seed_key or bad_hash.label or f"id:{bad_hash.id or 'unknown'}"
 
 
 def _get_cv2():

@@ -20,11 +20,13 @@ class AppConfig:
     pages_to_scan: int = 1
     scan_existing_on_first_run: bool = True
     max_image_bytes: int = 26_214_400
+    phash_strict_threshold: int = 4
     phash_threshold: int = 7
     enable_tile_phash: bool = True
     tile_phash_grid_size: int = 3
     tile_phash_threshold: int = 6
-    tile_phash_min_matches: int = 1
+    tile_phash_min_matches: int = 2
+    tile_phash_single_match_is_weak: bool = True
     enable_crop_resistant_hash: bool = True
     crop_hash_region_cutoff: int = 2
     crop_hash_hamming_cutoff: int = 8

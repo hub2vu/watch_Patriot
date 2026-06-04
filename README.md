@@ -106,11 +106,13 @@ jitter_seconds = 10
 pages_to_scan = 1
 scan_existing_on_first_run = true
 max_image_bytes = 26214400
+phash_strict_threshold = 4
 phash_threshold = 7
 enable_tile_phash = true
 tile_phash_grid_size = 3
 tile_phash_threshold = 6
-tile_phash_min_matches = 1
+tile_phash_min_matches = 2
+tile_phash_single_match_is_weak = true
 enable_crop_resistant_hash = true
 crop_hash_region_cutoff = 2
 crop_hash_hamming_cutoff = 8
@@ -137,18 +139,22 @@ use_appdata_dir = false
 
 - `nude_score_threshold`를 올립니다. 예: `0.45` → `0.65`
 - `phash_threshold`를 낮춥니다. 예: `7` → `5`
+- `phash_strict_threshold`를 낮춥니다. 기본값은 `4`입니다.
+- `tile_phash_min_matches`를 올립니다. 기본값은 `2`입니다.
 
 재업로드를 자주 놓칠 때:
 
 - `phash_threshold`를 올립니다. 예: `7` → `9`
 - `tile_phash_threshold`를 올립니다. 예: `6` → `8`
-- `tile_phash_min_matches`를 낮춥니다. 기본값은 `1`입니다.
+- `tile_phash_min_matches`를 낮춥니다. 기본값은 `2`입니다. 단, `tile_phash_single_match_is_weak = true`이면 단일 타일 매칭은 단독 high 경보가 되지 않습니다.
 - `crop_hash_hamming_cutoff`를 올립니다. 기본값은 `8`입니다.
 - `orb_min_matches`를 낮춥니다. 기본값은 `65`입니다.
 
 값을 올릴수록 유사 이미지 탐지는 넓어지지만 오탐 가능성도 커집니다.
 
-`crop-resistant hash`와 `ORB feature matching`은 기본적으로 보조 신호입니다. 둘 중 하나만 단독으로 맞으면 high 경보를 만들지 않고, SHA-256/pHash/tile pHash 같은 다른 신호가 함께 맞거나 crop-resistant hash와 ORB가 같은 bad hash 항목에서 함께 맞을 때만 high 경보를 만듭니다.
+`phash_strict_threshold` 이내의 pHash 매칭, SHA-256 매칭, 여러 타일 pHash 매칭은 강한 신호로 취급합니다. `phash_strict_threshold`를 넘고 `phash_threshold` 이내인 pHash 매칭은 borderline pHash로 보조 신호 취급합니다.
+
+`crop-resistant hash`, `ORB feature matching`, 단일 tile pHash, borderline pHash는 기본적으로 보조 신호입니다. 하나만 단독으로 맞으면 high 경보를 만들지 않고, 같은 `seed_key` 또는 같은 label을 가진 확정 이미지 묶음 안에서 보조 신호가 2종류 이상 함께 맞을 때만 high 경보를 만듭니다.
 
 ## 확정 테러 이미지 해시 등록
 

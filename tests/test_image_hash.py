@@ -59,6 +59,53 @@ def test_scan_image_marks_similar_phash_as_high() -> None:
     assert any("pHash" in reason for reason in result.reasons)
 
 
+def test_scan_image_suppresses_borderline_phash_without_corroboration(monkeypatch) -> None:
+    data = _png_bytes((20, 20, 200))
+    bad = BadHash(label="known", sha256=None, phash="0000000000000000")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_phash", lambda _data: "000000000000001f")
+
+    result = scan_image(
+        data,
+        [bad],
+        AppConfig(
+            phash_strict_threshold=4,
+            phash_threshold=7,
+            enable_tile_phash=False,
+            enable_crop_resistant_hash=False,
+            enable_orb_matching=False,
+        ),
+    )
+
+    assert result.risk == "none"
+    assert not any("pHash" in reason for reason in result.reasons)
+
+
+def test_scan_image_marks_borderline_phash_with_crop_same_seed_as_high(monkeypatch) -> None:
+    data = _png_bytes((20, 20, 200))
+    bad = BadHash(label="known", seed_key="seed-a", sha256=None, phash="0000000000000000", crop_hash="known-crop")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_phash", lambda _data: "000000000000001f")
+    monkeypatch.setattr("dc_watch.image_scan.compute_crop_resistant_hash", lambda _data: "candidate-crop")
+    monkeypatch.setattr("dc_watch.image_scan.crop_hash_matches", lambda _candidate, _known, _regions, _hamming: True)
+
+    result = scan_image(
+        data,
+        [bad],
+        AppConfig(
+            phash_strict_threshold=4,
+            phash_threshold=7,
+            enable_tile_phash=False,
+            enable_crop_resistant_hash=True,
+            enable_orb_matching=False,
+        ),
+    )
+
+    assert result.risk == "high"
+    assert any("borderline pHash" in reason for reason in result.reasons)
+    assert any("crop-resistant" in reason for reason in result.reasons)
+
+
 def test_scan_post_images_aggregates_image_hashes() -> None:
     data = _png_bytes((0, 120, 0))
     result = scan_post_images([data], [], AppConfig())
@@ -86,16 +133,32 @@ def test_scan_image_only_calls_nudenet_when_enabled(monkeypatch) -> None:
     assert calls == [0.66]
 
 
-def test_tile_phash_matches_cropped_reupload() -> None:
-    original = _pattern_grid_png_bytes()
-    crop = _crop_png_bytes(original, box=(32, 32, 64, 64))
-    bad = BadHash(label="known_crop_source", sha256=None, phash=None, tile_phashes=tuple(compute_tile_phashes(original, grid_size=3)))
+def test_scan_image_suppresses_single_tile_phash_match(monkeypatch) -> None:
+    data = _pattern_grid_png_bytes()
+    bad = BadHash(label="known_crop_source", sha256=None, phash=None, tile_phashes=("1111111111111111",))
 
-    result = scan_image(
-        crop,
-        [bad],
-        AppConfig(enable_tile_phash=True, tile_phash_grid_size=3, tile_phash_threshold=0, tile_phash_min_matches=1),
+    monkeypatch.setattr("dc_watch.image_scan.compute_phash", lambda _data: "0000000000000000")
+    monkeypatch.setattr("dc_watch.image_scan.compute_tile_phashes", lambda _data, _grid_size=3: ["1111111111111111"])
+
+    result = scan_image(data, [bad], AppConfig(enable_tile_phash=True, tile_phash_threshold=0, tile_phash_min_matches=1))
+
+    assert result.risk == "none"
+    assert not any("tile pHash" in reason for reason in result.reasons)
+
+
+def test_scan_image_marks_multiple_tile_phash_matches_as_high(monkeypatch) -> None:
+    data = _pattern_grid_png_bytes()
+    bad = BadHash(
+        label="known_crop_source",
+        sha256=None,
+        phash=None,
+        tile_phashes=("1111111111111111", "2222222222222222"),
     )
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_phash", lambda _data: "0000000000000000")
+    monkeypatch.setattr("dc_watch.image_scan.compute_tile_phashes", lambda _data, _grid_size=3: ["1111111111111111", "2222222222222222"])
+
+    result = scan_image(data, [bad], AppConfig(enable_tile_phash=True, tile_phash_threshold=0, tile_phash_min_matches=1))
 
     assert result.risk == "high"
     assert any("tile pHash" in reason for reason in result.reasons)
@@ -169,6 +232,47 @@ def test_scan_image_marks_crop_resistant_and_orb_together_as_high(monkeypatch) -
             crop_hash_region_cutoff=1,
             orb_min_matches=65,
         ),
+    )
+
+    assert result.risk == "high"
+    assert any("crop-resistant" in reason for reason in result.reasons)
+    assert any("ORB" in reason for reason in result.reasons)
+
+
+def test_scan_image_does_not_combine_weak_signals_from_different_seeds(monkeypatch) -> None:
+    data = _pattern_grid_png_bytes()
+    crop_bad = BadHash(label="known_a", seed_key="seed-a", crop_hash="known-crop")
+    orb_bad = BadHash(label="known_b", seed_key="seed-b", orb_descriptor=b"known")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_crop_resistant_hash", lambda _data: "candidate-crop")
+    monkeypatch.setattr("dc_watch.image_scan.crop_hash_matches", lambda _candidate, known, _regions, _hamming: known == "known-crop")
+    monkeypatch.setattr("dc_watch.image_scan.compute_orb_descriptor", lambda _data, _max_features=500: b"candidate")
+    monkeypatch.setattr("dc_watch.image_scan.orb_match_count", lambda _candidate, _known, _distance_threshold=64: 99)
+
+    result = scan_image(
+        data,
+        [crop_bad, orb_bad],
+        AppConfig(enable_crop_resistant_hash=True, enable_orb_matching=True, orb_min_matches=65),
+    )
+
+    assert result.risk == "none"
+    assert not result.reasons
+
+
+def test_scan_image_combines_weak_signals_across_variants_with_same_seed(monkeypatch) -> None:
+    data = _pattern_grid_png_bytes()
+    crop_bad = BadHash(label="known_a", seed_key="seed-a", variant="original", crop_hash="known-crop")
+    orb_bad = BadHash(label="known_a", seed_key="seed-a", variant="rotate_90", orb_descriptor=b"known")
+
+    monkeypatch.setattr("dc_watch.image_scan.compute_crop_resistant_hash", lambda _data: "candidate-crop")
+    monkeypatch.setattr("dc_watch.image_scan.crop_hash_matches", lambda _candidate, known, _regions, _hamming: known == "known-crop")
+    monkeypatch.setattr("dc_watch.image_scan.compute_orb_descriptor", lambda _data, _max_features=500: b"candidate")
+    monkeypatch.setattr("dc_watch.image_scan.orb_match_count", lambda _candidate, _known, _distance_threshold=64: 99)
+
+    result = scan_image(
+        data,
+        [crop_bad, orb_bad],
+        AppConfig(enable_crop_resistant_hash=True, enable_orb_matching=True, orb_min_matches=65),
     )
 
     assert result.risk == "high"
