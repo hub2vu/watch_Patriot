@@ -34,6 +34,9 @@ DCWatch = "dc_watch.gui:main"
 where = ["."]
 include = ["dc_watch*"]
 
+[tool.setuptools.package-data]
+dc_watch = ["bundled_bad_hashes.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

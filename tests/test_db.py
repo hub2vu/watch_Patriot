@@ -1,3 +1,6 @@
+import base64
+import json
+import sqlite3
 from pathlib import Path
 
 from dc_watch.db import Database
@@ -11,6 +14,20 @@ def test_db_migration_creates_tables_and_counts(tmp_path: Path) -> None:
     counts = db.stats()
 
     assert counts == {"seen_posts": 0, "alerts": 0, "bad_hashes": 0}
+
+
+def test_database_context_manager_closes_connection(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+
+    with db.connect() as conn:
+        conn.execute("SELECT 1")
+
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError as exc:
+        assert "closed" in str(exc).lower()
+    else:
+        raise AssertionError("database connection remained open after context manager exit")
 
 
 def test_seen_posts_alerts_and_bad_hash_registration(tmp_path: Path) -> None:
@@ -98,3 +115,95 @@ def test_bad_hash_round_trips_crop_hash_orb_descriptor_and_variant(tmp_path: Pat
     assert loaded.crop_hash == "c" * 16
     assert loaded.orb_descriptor == b"orb-bytes"
     assert loaded.variant == "rotate_90"
+
+
+def test_import_bundled_bad_hashes_round_trips_tiles_and_sanitizes_source_path(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+    db.migrate()
+    seed_path = tmp_path / "bundled_bad_hashes.json"
+    seed_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "bad_hashes": [
+                    {
+                        "seed_key": "seeded:one",
+                        "label": "seeded_attack",
+                        "sha256": "a" * 64,
+                        "phash": "b" * 16,
+                        "crop_hash": "c" * 16,
+                        "orb_descriptor_b64": base64.b64encode(b"orb-bytes").decode("ascii"),
+                        "variant": "rotate_90",
+                        "source_post_no": "123",
+                        "source_file": r"C:\Users\hub2v\Downloads\bad.jpg",
+                        "added_at": 1234,
+                        "tile_phashes": ["1" * 16, "2" * 16],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inserted = db.import_bundled_bad_hashes(seed_path)
+    inserted_again = db.import_bundled_bad_hashes(seed_path)
+    loaded = db.get_bad_hashes()
+
+    assert inserted == 1
+    assert inserted_again == 0
+    assert len(loaded) == 1
+    assert loaded[0].label == "seeded_attack"
+    assert loaded[0].sha256 == "a" * 64
+    assert loaded[0].phash == "b" * 16
+    assert loaded[0].crop_hash == "c" * 16
+    assert loaded[0].orb_descriptor == b"orb-bytes"
+    assert loaded[0].variant == "rotate_90"
+    assert loaded[0].source_post_no == "123"
+    assert loaded[0].source_file == "bad.jpg"
+    assert loaded[0].seed_key == "seeded:one"
+    assert loaded[0].tile_phashes == ("1" * 16, "2" * 16)
+
+
+def test_import_bundled_bad_hashes_skips_existing_equivalent_without_seed_key(tmp_path: Path) -> None:
+    db = Database(tmp_path / "watch.sqlite3")
+    db.migrate()
+    db.add_bad_hash(
+        BadHash(
+            label="seeded_attack",
+            sha256="a" * 64,
+            phash="b" * 16,
+            crop_hash="c" * 16,
+            variant="original",
+            source_file=r"C:\Users\hub2v\Downloads\bad.jpg",
+            tile_phashes=("1" * 16,),
+        )
+    )
+    seed_path = tmp_path / "bundled_bad_hashes.json"
+    seed_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "bad_hashes": [
+                    {
+                        "seed_key": "seeded:equivalent",
+                        "label": "seeded_attack",
+                        "sha256": "a" * 64,
+                        "phash": "b" * 16,
+                        "crop_hash": "c" * 16,
+                        "variant": "original",
+                        "source_file": "bundled_seed",
+                        "tile_phashes": ["1" * 16],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inserted = db.import_bundled_bad_hashes(seed_path)
+    loaded = db.get_bad_hashes()
+
+    assert inserted == 0
+    assert len(loaded) == 1
+    assert loaded[0].seed_key == "seeded:equivalent"
+    assert loaded[0].source_file == "bundled_seed"

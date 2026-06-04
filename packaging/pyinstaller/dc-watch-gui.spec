@@ -18,7 +18,11 @@ a = Analysis(
     ["dc_watch_gui_launcher.py"],
     pathex=["../.."],
     binaries=[],
-    datas=[("../../config.example.toml", "."), ("../../README.md", ".")],
+    datas=[
+        ("../../config.example.toml", "."),
+        ("../../README.md", "."),
+        ("../../dc_watch/bundled_bad_hashes.json", "dc_watch"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

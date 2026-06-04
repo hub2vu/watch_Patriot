@@ -166,6 +166,8 @@ python -m dc_watch remember-file .\bad.jpg known_attack_002
 
 `remember-file`, `remember-post`, GUI 확정 등록은 원본뿐 아니라 좌우반전, 회전, 회전+반전 변형의 SHA-256/pHash/tile pHash/crop-resistant hash/ORB descriptor를 등록합니다. 원본 이미지 파일이나 변형 이미지는 DB에 저장하지 않습니다.
 
+프로젝트에는 관리자가 확정한 기본 bad hash seed가 `dc_watch/bundled_bad_hashes.json`으로 포함됩니다. 이 seed에는 원본 이미지가 들어 있지 않고 SHA-256, pHash, crop-resistant hash, tile pHash, ORB descriptor 메타데이터만 들어 있습니다. 새 DB를 만들거나 기존 DB를 migration할 때 자동으로 import되며, 같은 항목은 중복 등록되지 않습니다.
+
 GUI에서는 최근 경보 목록 또는 팝업의 `이 글을 확정 테러 해시 DB에 등록` 버튼을 사용할 수 있습니다. 로컬 파일을 직접 등록하려면 메인 창의 `로컬 이미지 해시 DB 등록` 버튼을 누른 뒤 파일과 라벨을 선택합니다.
 
 잘못 등록한 항목은 GUI 메인 창의 `bad hash DB 관리` 버튼에서 선택한 뒤 `선택 삭제`로 제거할 수 있습니다. 이 목록에는 이미지, 썸네일, 이미지 URL을 표시하지 않습니다.

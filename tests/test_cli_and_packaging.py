@@ -64,8 +64,12 @@ def test_pyinstaller_specs_resolve_sources_from_repo_root() -> None:
     assert '("../../README.md", ".")' in gui_spec
     assert '("../../config.example.toml", ".")' in cli_spec
     assert '("../../README.md", ".")' in cli_spec
+    assert '("../../dc_watch/bundled_bad_hashes.json", "dc_watch")' in gui_spec
+    assert '("../../dc_watch/bundled_bad_hashes.json", "dc_watch")' in cli_spec
+    assert (root / "dc_watch/bundled_bad_hashes.json").exists()
     assert 'pathex=["../.."]' in gui_spec
     assert 'pathex=["../.."]' in cli_spec
+    assert 'dc_watch = ["bundled_bad_hashes.json"]' in (root / "pyproject.toml").read_text(encoding="utf-8")
     assert "Invoke-Native" in build_script
 
 

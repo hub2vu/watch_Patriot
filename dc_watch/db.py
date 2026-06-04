@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sqlite3
 import time
+from importlib import resources
 from pathlib import Path
+from typing import Any
 from typing import Iterable
 
 from .models import Alert, BadHash, ImageHashRecord, Post
 
+
+BUNDLED_BAD_HASHES_RESOURCE = "bundled_bad_hashes.json"
+SKIP_BUNDLED_SEED_ENV = "DCWATCH_SKIP_BUNDLED_BAD_HASH_SEED"
 
 SCHEMA = (
     """
@@ -65,6 +72,7 @@ SCHEMA = (
         variant TEXT DEFAULT 'original',
         source_post_no TEXT,
         source_file TEXT,
+        seed_key TEXT,
         added_at INTEGER
     )
     """,
@@ -85,7 +93,7 @@ class Database:
 
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -98,7 +106,10 @@ class Database:
             _ensure_column(conn, "bad_hashes", "crop_hash", "TEXT")
             _ensure_column(conn, "bad_hashes", "orb_descriptor", "BLOB")
             _ensure_column(conn, "bad_hashes", "variant", "TEXT DEFAULT 'original'")
+            _ensure_column(conn, "bad_hashes", "seed_key", "TEXT")
             conn.commit()
+        if not _env_flag(SKIP_BUNDLED_SEED_ENV):
+            self.import_bundled_bad_hashes()
 
     def stats(self) -> dict[str, int]:
         with self.connect() as conn:
@@ -251,8 +262,8 @@ class Database:
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO bad_hashes(label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, added_at)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO bad_hashes(label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, seed_key, added_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     bad_hash.label,
@@ -263,6 +274,7 @@ class Database:
                     bad_hash.variant,
                     bad_hash.source_post_no,
                     bad_hash.source_file,
+                    bad_hash.seed_key,
                     bad_hash.added_at or _now(),
                 ),
             )
@@ -295,7 +307,7 @@ class Database:
     def get_bad_hashes(self) -> list[BadHash]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, added_at FROM bad_hashes ORDER BY id"
+                "SELECT id, label, sha256, phash, crop_hash, orb_descriptor, variant, source_post_no, source_file, seed_key, added_at FROM bad_hashes ORDER BY id"
             ).fetchall()
             tile_rows = conn.execute("SELECT bad_hash_id, phash FROM bad_hash_tiles ORDER BY bad_hash_id, tile_index").fetchall()
         tiles_by_bad_hash: dict[int, list[str]] = {}
@@ -313,10 +325,57 @@ class Database:
                 source_post_no=row["source_post_no"],
                 source_file=row["source_file"],
                 added_at=row["added_at"],
+                seed_key=row["seed_key"],
                 tile_phashes=tuple(tiles_by_bad_hash.get(int(row["id"]), [])),
             )
             for row in rows
         ]
+
+    def import_bundled_bad_hashes(self, seed_path: str | Path | None = None) -> int:
+        payload = _load_seed_payload(seed_path)
+        entries = payload.get("bad_hashes")
+        if not isinstance(entries, list):
+            return 0
+
+        inserted = 0
+        with self.connect() as conn:
+            for index, raw_entry in enumerate(entries):
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = _normalize_seed_entry(raw_entry, index)
+                if entry is None:
+                    continue
+                existing_id = _find_existing_seed_row(conn, entry)
+                if existing_id is not None:
+                    _mark_existing_seed_row(conn, existing_id, entry)
+                    continue
+
+                cursor = conn.execute(
+                    """
+                    INSERT INTO bad_hashes(
+                        label, sha256, phash, crop_hash, orb_descriptor, variant,
+                        source_post_no, source_file, seed_key, added_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        entry["label"],
+                        entry["sha256"],
+                        entry["phash"],
+                        entry["crop_hash"],
+                        entry["orb_descriptor"],
+                        entry["variant"],
+                        entry["source_post_no"],
+                        entry["source_file"],
+                        entry["seed_key"],
+                        entry["added_at"],
+                    ),
+                )
+                bad_hash_id = int(cursor.lastrowid)
+                _insert_missing_tiles(conn, bad_hash_id, entry["tile_phashes"])
+                inserted += 1
+            conn.commit()
+        return inserted
 
     def delete_bad_hash(self, bad_hash_id: int) -> bool:
         with self.connect() as conn:
@@ -327,6 +386,14 @@ class Database:
             conn.execute("DELETE FROM bad_hashes WHERE id = ?", (bad_hash_id,))
             conn.commit()
             return True
+
+
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
 
 
 def _alert_from_row(row: sqlite3.Row) -> Alert:
@@ -351,3 +418,152 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaratio
     existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_seed_payload(seed_path: str | Path | None) -> dict[str, Any]:
+    if seed_path is not None:
+        path = Path(seed_path)
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    try:
+        seed_resource = resources.files("dc_watch").joinpath(BUNDLED_BAD_HASHES_RESOURCE)
+        if not seed_resource.is_file():
+            return {}
+        return json.loads(seed_resource.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ModuleNotFoundError):
+        return {}
+
+
+def _normalize_seed_entry(entry: dict[str, Any], index: int) -> dict[str, Any] | None:
+    label = _clean_text(entry.get("label"))
+    if not label:
+        return None
+    normalized = {
+        "seed_key": _clean_text(entry.get("seed_key")) or _fallback_seed_key(entry, index),
+        "label": label,
+        "sha256": _clean_text(entry.get("sha256")),
+        "phash": _clean_text(entry.get("phash")),
+        "crop_hash": _clean_text(entry.get("crop_hash")),
+        "orb_descriptor": _decode_orb_descriptor(entry.get("orb_descriptor_b64")),
+        "variant": _clean_text(entry.get("variant")) or "original",
+        "source_post_no": _clean_text(entry.get("source_post_no")),
+        "source_file": _sanitize_source_file(entry.get("source_file")),
+        "added_at": _safe_int(entry.get("added_at")) or _now(),
+        "tile_phashes": tuple(_clean_text(item) for item in entry.get("tile_phashes", []) if _clean_text(item)),
+    }
+    if not any((normalized["sha256"], normalized["phash"], normalized["crop_hash"], normalized["orb_descriptor"], normalized["tile_phashes"])):
+        return None
+    return normalized
+
+
+def _fallback_seed_key(entry: dict[str, Any], index: int) -> str:
+    parts = [
+        _clean_text(entry.get("label")) or "",
+        _clean_text(entry.get("sha256")) or "",
+        _clean_text(entry.get("phash")) or "",
+        _clean_text(entry.get("crop_hash")) or "",
+        _clean_text(entry.get("variant")) or "original",
+        str(index),
+    ]
+    return "bundled:" + "|".join(parts)
+
+
+def _find_existing_seed_row(conn: sqlite3.Connection, entry: dict[str, Any]) -> int | None:
+    seed_key = entry["seed_key"]
+    if seed_key:
+        row = conn.execute("SELECT id FROM bad_hashes WHERE seed_key = ? LIMIT 1", (seed_key,)).fetchone()
+        if row is not None:
+            return int(row["id"])
+
+    row = conn.execute(
+        """
+        SELECT id FROM bad_hashes
+        WHERE COALESCE(label, '') = ?
+          AND COALESCE(sha256, '') = ?
+          AND COALESCE(phash, '') = ?
+          AND COALESCE(crop_hash, '') = ?
+          AND COALESCE(variant, 'original') = ?
+        LIMIT 1
+        """,
+        (
+            entry["label"] or "",
+            entry["sha256"] or "",
+            entry["phash"] or "",
+            entry["crop_hash"] or "",
+            entry["variant"] or "original",
+        ),
+    ).fetchone()
+    return int(row["id"]) if row is not None else None
+
+
+def _mark_existing_seed_row(conn: sqlite3.Connection, bad_hash_id: int, entry: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        UPDATE bad_hashes
+        SET seed_key = COALESCE(seed_key, ?),
+            crop_hash = COALESCE(crop_hash, ?),
+            orb_descriptor = COALESCE(orb_descriptor, ?),
+            source_post_no = COALESCE(source_post_no, ?),
+            source_file = CASE WHEN ? IS NOT NULL THEN ? ELSE source_file END
+        WHERE id = ?
+        """,
+        (
+            entry["seed_key"],
+            entry["crop_hash"],
+            entry["orb_descriptor"],
+            entry["source_post_no"],
+            entry["source_file"],
+            entry["source_file"],
+            bad_hash_id,
+        ),
+    )
+    _insert_missing_tiles(conn, bad_hash_id, entry["tile_phashes"])
+
+
+def _insert_missing_tiles(conn: sqlite3.Connection, bad_hash_id: int, tile_phashes: Iterable[str]) -> None:
+    existing = {
+        (int(row["tile_index"]), row["phash"])
+        for row in conn.execute("SELECT tile_index, phash FROM bad_hash_tiles WHERE bad_hash_id = ?", (bad_hash_id,)).fetchall()
+    }
+    rows = [(bad_hash_id, index, phash) for index, phash in enumerate(tile_phashes) if (index, phash) not in existing]
+    if rows:
+        conn.executemany("INSERT INTO bad_hash_tiles(bad_hash_id, tile_index, phash) VALUES(?, ?, ?)", rows)
+
+
+def _decode_orb_descriptor(value: Any) -> bytes | None:
+    if not value:
+        return None
+    try:
+        return base64.b64decode(str(value), validate=True)
+    except (ValueError, TypeError):
+        return None
+
+
+def _sanitize_source_file(value: Any) -> str | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    filename = text.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not filename or filename in {".", ".."}:
+        return None
+    return filename
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

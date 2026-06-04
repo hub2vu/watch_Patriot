@@ -28,6 +28,7 @@ class BadHash:
     source_file: str | None = None
     added_at: int = 0
     id: int | None = None
+    seed_key: str | None = None
     tile_phashes: tuple[str, ...] = field(default_factory=tuple)
 
 
