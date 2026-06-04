@@ -117,7 +117,7 @@ crop_hash_hamming_cutoff = 16
 enable_orb_matching = true
 orb_max_features = 500
 orb_distance_threshold = 64
-orb_min_matches = 60
+orb_min_matches = 65
 enable_nudenet = false
 nude_score_threshold = 0.45
 alert_on_analysis_failure = false
@@ -144,7 +144,7 @@ use_appdata_dir = false
 - `tile_phash_threshold`를 올립니다. 예: `6` → `8`
 - `tile_phash_min_matches`를 낮춥니다. 기본값은 `1`입니다.
 - `crop_hash_hamming_cutoff`를 올립니다. 기본값은 `16`입니다.
-- `orb_min_matches`를 낮춥니다. 기본값은 `60`입니다.
+- `orb_min_matches`를 낮춥니다. 기본값은 `65`입니다.
 
 값을 올릴수록 유사 이미지 탐지는 넓어지지만 오탐 가능성도 커집니다.
 
