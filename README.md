@@ -1,6 +1,8 @@
-# DCWatch
+<img width="2686" height="2163" alt="image" src="https://github.com/user-attachments/assets/5569007f-b7d7-4b1d-b012-234a41b5a68c" />
 
-DCWatch는 DCInside `특이점이 온다` 마이너 갤러리(`thesingularity`)에 새 글이 올라왔을 때, 이미지 테러 의심 글을 관리자가 갑자기 직접 보지 않도록 사전에 경고하는 Windows용 로컬 감시 도구입니다.
+
+
+# Watch
 
 이 도구는 자동 삭제, 자동 차단, 자동 신고를 하지 않습니다. 최종 확인과 삭제/차단은 사용자가 직접 합니다.
 
@@ -17,15 +19,7 @@ DCWatch는 DCInside `특이점이 온다` 마이너 갤러리(`thesingularity`)�
 
 ## 감지 방식
 
-DCWatch는 이미지를 화면에 표시하지 않고 바이트로만 다운로드한 뒤 다음 방식으로 검사합니다.
-
-- SHA-256 완전 일치: 확정된 테러 이미지 해시와 같으면 `high`
-- pHash 유사도: 확정된 테러 이미지 pHash와 Hamming distance가 설정값 이하이면 `high`
-- 타일 pHash: 이미지를 3x3 같은 격자로 나눈 뒤 조각별 pHash도 비교합니다. 기존 이미지의 일부만 크롭해 재업로드한 경우를 더 잘 잡기 위한 보조 탐지입니다.
-- crop-resistant hash: imagehash의 segment hash를 저장해 부분 crop 재업로드를 추가로 비교합니다.
-- ORB feature matching: OpenCV가 포함된 빌드에서는 회전/크롭에 강한 특징점 descriptor도 비교합니다. OpenCV가 없으면 이 기능만 자동으로 건너뜁니다.
-- NudeNet: 노출/나체 계열 라벨 점수가 설정값 이상이면 `high`
-- 분석 실패: `alert_on_analysis_failure = true`일 때만 `warning`
+이미지를 화면에 표시하지 않고 바이트로만 다운로드한 뒤 다음 방식으로 검사합니다.
 
 완전히 새로운 배설물/혐오 이미지는 해시 DB만으로는 놓칠 수 있습니다. 이 도구는 새 혐오 이미지를 LLM 없이 안정적으로 판정한다고 과장하지 않습니다. 사용자가 확인한 뒤 “확정 테러 해시 DB에 등록”하면 이후 동일/유사 재업로드 탐지에 도움이 됩니다.
 
